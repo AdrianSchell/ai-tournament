@@ -1,0 +1,14 @@
+name = "ai-tournament-api"
+main = "index.js"
+compatibility_date = "2026-09-01"
+
+# Fill in the KV namespace ID after creating it with Wrangler.
+[[kv_namespaces]]
+binding = "TOURNAMENT_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+ALLOWED_ORIGIN = "https://YOUR-USERNAME.github.io"
+DEADLINE_UTC = "2026-12-01T23:59:00Z"
+# Set TEAM_CODES_JSON and ADMIN_TOKEN using Wrangler secrets, not this file.
+# Optional: add ROUND1_DEADLINE_UTC and ROUND2_DEADLINE_UTC in [vars].
