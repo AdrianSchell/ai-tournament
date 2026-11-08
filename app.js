@@ -6,14 +6,44 @@ function page(p){document.querySelectorAll('.page').forEach(x=>x.classList.toggl
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>page(b.dataset.page));const hash=location.hash.slice(1);if(['home','datasets','submit','leaderboard','about','admin'].includes(hash))page(hash);
 async function request(path,options={}){if(!api||api.includes('REPLACE-ME'))throw Error('Cloudflare API URL has not been configured in config.js');const r=await fetch(api+path,{method:options.method||'GET',headers:{'content-type':'application/json',...(options.admin?{'x-admin-token':$('adminToken').value}: {})},body:options.body?JSON.stringify(options.body):undefined});const d=await r.json();if(!r.ok)throw Error(d.error||`Request failed (${r.status})`);return d;}
 const round=()=>$('studentRound').value,adminRound=()=>$('adminRound').value,expected=r=>r==='round1'?100:200;
-$('studentRound').onchange=()=>{$('expectedRows').textContent=expected(round());loadStatus();};
+$('studentRound').onchange=()=>{$('expectedRows').textContent=expected(round());clearFileError();msg('studentMsg','');loadStatus();};
 async function loadStatus(){try{const d=await request('/api/status?round='+round());$('roundStatus').textContent=(d.closed?'Submissions closed':'Submissions open')+(d.deadline?' · Deadline: '+new Date(d.deadline).toLocaleString():'');$('nextStep').disabled=d.closed;}catch(e){$('roundStatus').textContent=e.message;}}
-function fileSet(f){if(!f)return;selectedFile=f;$('fileName').textContent=f.name+' ('+Math.ceil(f.size/1024)+' KB)';}
+function clearFileError(){const el=$('fileError');el.textContent='';el.classList.add('hidden');}
+function showFileError(message){const el=$('fileError');el.textContent=message;el.classList.remove('hidden');}
+function fileSet(f){if(!f)return;selectedFile=f;$('fileName').textContent=f.name+' ('+Math.ceil(f.size/1024)+' KB)';clearFileError();msg('studentMsg','');}
 $('predictionFile').onchange=e=>fileSet(e.target.files[0]);const drop=$('drop');drop.ondragover=e=>{e.preventDefault();drop.classList.add('drag')};drop.ondragleave=()=>drop.classList.remove('drag');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag');fileSet(e.dataTransfer.files[0]);};
 function step(n){[1,2,3].forEach(i=>{$('step'+i).classList.toggle('hidden',i!==n);document.querySelector('[data-step="'+i+'"]').classList.toggle('active',i===n);});}
-$('nextStep').onclick=async()=>{try{if(!selectedFile)throw Error('Choose a CSV file first');if(selectedFile.size>100000)throw Error('CSV file exceeds 100 KB');const text=await selectedFile.text(),lines=text.replace(/^\uFEFF/,'').trim().split(/\r?\n/);if(lines[0].trim()!=='image_id,predicted_label')throw Error('Expected header: image_id,predicted_label');if(lines.length-1!==expected(round()))throw Error(`Expected ${expected(round())} predictions; found ${lines.length-1}`);$('fileReview').textContent=`${selectedFile.name} · ${round()==='round1'?'Round 1':'Round 2'} · ${lines.length-1} image rows`;msg('studentMsg','');step(2);}catch(e){msg('studentMsg',e.message,'error');}};
-$('backStep').onclick=()=>step(1);$('another').onclick=()=>{step(1);selectedFile=null;$('predictionFile').value='';$('fileName').textContent='No file selected';};
-$('submit').onclick=async()=>{const b=$('submit');try{if(!selectedFile)throw Error('No file selected');b.disabled=true;const d=await request('/api/submit?round='+round(),{method:'POST',body:{team:$('team').value,code:$('teamCode').value,csv:await selectedFile.text()}});$('receipt').textContent=`${d.team}: ${d.count} predictions received for ${d.round}. Confirmation time: ${new Date(d.submittedAt).toLocaleString()}. You may replace the submission before the deadline.`;msg('studentMsg','');step(3);}catch(e){msg('studentMsg',e.message,'error');}finally{b.disabled=false;}};
+function validateStudentCsv(text,which){
+ const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(line=>line.trim()!=='');
+ const header=(lines.shift()||'').split(',').map(x=>x.trim());
+ if(header[0]==='image_id'&&header[1]==='true_label')throw Error('You selected an instructor answer key. Please upload a student predictions CSV with headers image_id,predicted_label.');
+ if(header.length!==2||header[0]!=='image_id'||header[1]!=='predicted_label')throw Error('Invalid CSV header. The first row must be: image_id,predicted_label');
+ if(lines.length!==expected(which))throw Error(`Expected ${expected(which)} image rows for ${which==='round1'?'Round 1':'Round 2'}, but found ${lines.length}.`);
+ const ids=new Set();
+ for(let i=0;i<lines.length;i++){
+   const fields=lines[i].split(',').map(x=>x.trim());
+   if(fields.length!==2)throw Error(`Row ${i+2}: expected exactly two columns.`);
+   const [id,label]=fields;
+   if(!id)throw Error(`Row ${i+2}: image_id is blank.`);
+   if(ids.has(id))throw Error(`Row ${i+2}: duplicate image_id ${id}.`);
+   if(!/^[0-9]$/.test(label))throw Error(`Row ${i+2}: predicted_label must be an integer from 0 to 9.`);
+   ids.add(id);
+ }
+ return lines.length;
+}
+$('nextStep').onclick=async()=>{
+ clearFileError();
+ try{
+  if(!selectedFile)throw Error('Choose a student predictions CSV file before continuing.');
+  if(!/\.csv$/i.test(selectedFile.name))throw Error('Please choose a .csv file.');
+  if(selectedFile.size>100000)throw Error('CSV file exceeds 100 KB.');
+  const count=validateStudentCsv(await selectedFile.text(),round());
+  $('fileReview').textContent=`${selectedFile.name} · ${round()==='round1'?'Round 1':'Round 2'} · ${count} image rows`;
+  msg('studentMsg','');step(2);
+ }catch(e){showFileError(e.message);}
+};
+$('backStep').onclick=()=>step(1);$('another').onclick=()=>{step(1);selectedFile=null;$('predictionFile').value='';$('fileName').textContent='No file selected';clearFileError();msg('studentMsg','');};
+$('submit').onclick=async()=>{const b=$('submit');try{if(!selectedFile)throw Error('No file selected');if(!$('team').value)throw Error('Select your team before submitting.');if(!$('teamCode').value.trim())throw Error('Enter your team access code.');b.disabled=true;const d=await request('/api/submit?round='+round(),{method:'POST',body:{team:$('team').value,code:$('teamCode').value,csv:await selectedFile.text()}});$('receipt').textContent=`${d.team}: ${d.count} predictions received for ${d.round}. Confirmation time: ${new Date(d.submittedAt).toLocaleString()}. You may replace the submission before the deadline.`;msg('studentMsg','');step(3);}catch(e){msg('studentMsg',e.message,'error');}finally{b.disabled=false;}};
 document.querySelectorAll('[data-public-round]').forEach(b=>b.onclick=()=>{publicRound=b.dataset.publicRound;document.querySelectorAll('[data-public-round]').forEach(x=>x.classList.toggle('active',x===b));loadPublic();});
 async function loadPublic(){try{const d=await request('/api/public/leaderboard?round='+publicRound);$('publicLeaderboard').innerHTML=!d.published?'<p class="muted">Results have not yet been published by the instructor.</p>':`<table><thead><tr><th>Rank</th><th>Team</th><th>Accuracy</th></tr></thead><tbody>${d.teams.map(t=>`<tr><td>${t.rank}</td><td>${esc(t.team)}</td><td>${t.accuracy.toFixed(2)}%</td></tr>`).join('')}</tbody></table>`;}catch(e){$('publicLeaderboard').textContent=e.message;}}
 function viewAdmin(v){adminView=v;const ids={submissions:'adminSubmissions',scores:'adminScores',answers:'adminAnswers',info:'adminInfo',settings:'adminSettings'};Object.entries(ids).forEach(([key,id])=>$(id).classList.toggle('hidden',v!==key));document.querySelectorAll('[data-admin-view]').forEach(b=>b.classList.toggle('active',b.dataset.adminView===v));$('adminTitle').textContent={submissions:'Submissions',scores:'Leaderboard and analysis',answers:'Private answer key',info:'Dataset information',settings:'Settings'}[v];}
