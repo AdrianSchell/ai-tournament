@@ -76,3 +76,37 @@
   #home .hero-photo {background-size:cover,auto 205px;}
   #home .hero-copy {padding:195px 24px 90px;}
 }
+
+/* v8.2: target-matched Tech Tower photograph with baked-in edge fades.
+   This overrides the earlier background and avoids a visible vertical seam. */
+#home .hero {
+  position:relative;
+  isolation:isolate;
+  grid-template-columns:42% 58%;
+  min-height:365px;
+  background:#f6f9ff;
+  overflow:hidden;
+}
+#home .hero-photo {
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  min-height:0;
+  background-color:transparent;
+  background-image:url('assets/tech-tower-seamless.png');
+  background-position:left top;
+  background-size:auto 100%;
+  background-repeat:no-repeat;
+  -webkit-mask-image:none;
+  mask-image:none;
+}
+#home .hero-copy {grid-column:2;position:relative;z-index:1;}
+@media(max-width:850px){
+  #home .hero{grid-template-columns:1fr;}
+  #home .hero-photo{background-size:auto 245px;background-position:left top;}
+  #home .hero-copy{grid-column:1;padding:235px 24px 95px;}
+}
+@media(max-width:520px){
+  #home .hero-photo{background-size:auto 205px;}
+  #home .hero-copy{padding:195px 24px 90px;}
+}
