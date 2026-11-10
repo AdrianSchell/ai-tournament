@@ -118,3 +118,8 @@
     background-position:left top;
   }
 }
+
+/* v8.4: dataset download guidance; preserve the 72% Tech Tower zoom. */
+.dataset-card>div:first-child{flex:1;min-width:0}
+.dataset-instructions{max-width:750px;margin:10px 0 0!important}
+.dataset-card .download-link{text-align:center}
