@@ -5,9 +5,9 @@ const msg=(id,s,type='')=>$(id).innerHTML=`<div class="message ${type}">${esc(s)
 function page(p){document.querySelectorAll('.page').forEach(x=>x.classList.toggle('hidden',x.id!==p));document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===p));location.hash=p;window.scrollTo(0,0);if(p==='leaderboard')loadPublic();if(p==='datasets')loadDatasets();if(p==='submit')loadStatus();if(p==='admin'&&$('adminToken').value.trim())loadAdmin();}
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>page(b.dataset.page));const hash=location.hash.slice(1);if(['home','datasets','submit','leaderboard','feedback','about','admin'].includes(hash))page(hash);
 async function request(path,options={}){if(!api||api.includes('REPLACE-ME'))throw Error('Cloudflare API URL has not been configured in config.js');const r=await fetch(api+path,{method:options.method||'GET',headers:{'content-type':'application/json',...(options.admin?{'x-admin-token':$('adminToken').value}: {})},body:options.body?JSON.stringify(options.body):undefined});const raw=await r.text();let d;try{d=JSON.parse(raw);}catch{throw Error(`Server returned an unexpected response (HTTP ${r.status}). Contact the instructor.`);}if(!r.ok)throw Error(d.error||`Request failed (${r.status})`);return d;}
-function round(){return $('studentRound').value;}function adminRound(){return $('adminRound').value;}function expected(r){return r==='round1'?100:200;}
+function round(){return $('studentRound').value;}function adminRound(){return $('adminRound').value;}function expected(r){return r==='round1'?100:200;}function fmtPct(v){return v==null?'\u2014':Number(v).toFixed(2)+'%';}function fmtPP(v){return v==null?'\u2014':(v>0?'+':'')+Number(v).toFixed(2)+' pp';}function fmtTime(v){return v?new Date(v).toLocaleString():'\u2014';}
 $('studentRound').onchange=()=>{const first=round()==='round1';$('submissionPass').classList.toggle('hidden',!first);$('submissionPassLabel').classList.toggle('hidden',!first);$('passHint').classList.toggle('hidden',!first);$('expectedRows').textContent=expected(round());clearFileError();msg('studentMsg','');loadStatus();};
-async function loadStatus(){try{const d=await request('/api/status?round='+round());$('roundStatus').textContent=(d.closed?'Submissions closed by instructor':'Submissions open');$('nextStep').disabled=d.closed;}catch(e){$('roundStatus').textContent=e.message;}}
+async function loadStatus(){try{const d=await request('/api/status?round='+round());$('roundStatus').textContent=d.closed?'Submissions closed by instructor':(round()==='round2'?'Round 2 submissions are open. Every upload is saved in your history; your highest score counts.':'Submissions open');$('nextStep').disabled=d.closed;}catch(e){$('roundStatus').textContent=e.message;}}
 function clearFileError(){const el=$('fileError');el.textContent='';el.classList.add('hidden');}
 function showFileError(message){const el=$('fileError');el.textContent=message;el.classList.remove('hidden');}
 function fileSet(f){if(!f)return;selectedFile=f;$('fileName').textContent=f.name+' ('+Math.ceil(f.size/1024)+' KB)';clearFileError();msg('studentMsg','');}
@@ -43,20 +43,87 @@ $('nextStep').onclick=async()=>{
  }catch(e){showFileError(e.message);}
 };
 $('backStep').onclick=()=>step(1);$('another').onclick=()=>{step(1);selectedFile=null;$('predictionFile').value='';$('fileName').textContent='No file selected';clearFileError();msg('studentMsg','');};
-$('submit').onclick=async()=>{const b=$('submit');try{if(!selectedFile)throw Error('No file selected');if(!$('team').value)throw Error('Select your team before submitting.');if(!$('teamCode').value.trim())throw Error('Enter your team access code.');b.disabled=true;const d=await request('/api/submit?round='+round(),{method:'POST',body:{team:$('team').value,code:$('teamCode').value,pass:round()==='round1'?$('submissionPass').value:'final',csv:await selectedFile.text()}});$('receipt').textContent=`${d.team}: ${d.count} ${d.pass==='baseline'?'first-pass':'second-pass'} predictions received for ${d.round}. Confirmation time: ${new Date(d.submittedAt).toLocaleString()}. You may replace your second-pass submission while submissions remain open.`;msg('studentMsg','');step(3);}catch(e){msg('studentMsg',e.message,'error');}finally{b.disabled=false;}};
+$('submit').onclick=async()=>{const b=$('submit');try{if(!selectedFile)throw Error('No file selected');if(!$('team').value)throw Error('Select your team before submitting.');if(!$('teamCode').value.trim())throw Error('Enter your team access code.');b.disabled=true;const d=await request('/api/submit?round='+round(),{method:'POST',body:{team:$('team').value,code:$('teamCode').value,pass:round()==='round1'?$('submissionPass').value:'final',csv:await selectedFile.text()}});$('receipt').textContent=round()==='round2'?`${d.team}: Round 2 submission received (${d.count} predictions) at ${new Date(d.submittedAt).toLocaleString()}. This upload is added to your history; your highest scored submission counts.`:`${d.team}: ${d.count} ${d.pass==='baseline'?'first-pass':'second-pass'} predictions received for Round 1 at ${new Date(d.submittedAt).toLocaleString()}.`;msg('studentMsg','');step(3);}catch(e){msg('studentMsg',e.message,'error');}finally{b.disabled=false;}};
 document.querySelectorAll('[data-public-round]').forEach(b=>b.onclick=()=>{publicRound=b.dataset.publicRound;document.querySelectorAll('[data-public-round]').forEach(x=>x.classList.toggle('active',x===b));loadPublic();});
-async function loadPublic(){try{const d=await request('/api/public/leaderboard?round='+publicRound);$('publicLeaderboard').innerHTML=!d.published?'<p class="muted">Results have not yet been published by the instructor.</p>':`<table><thead><tr><th>Rank</th><th>Team</th>${publicRound==='round1'?'<th>First pass</th><th>Second pass</th><th>Change (pp)</th>':'<th>Accuracy</th>'}</tr></thead><tbody>${d.teams.map(t=>`<tr><td>${t.rank}</td><td>${esc(t.team)}</td>${publicRound==='round1'?`<td>${t.baseline==null?'—':t.baseline.toFixed(2)+'%'}</td><td>${t.accuracy.toFixed(2)}%</td><td>${t.change==null?'—':(t.change>0?'+':'')+t.change.toFixed(2)}</td>`:`<td>${t.accuracy.toFixed(2)}%</td>`}</tr>`).join('')}</tbody></table>`;}catch(e){$('publicLeaderboard').textContent=e.message;}}
+async function loadPublic(){try{
+ const d=await request('/api/public/leaderboard?round='+publicRound);
+ if(!d.published){$('publicLeaderboard').innerHTML='<p class="muted">Results have not been published by the instructor.</p>';return;}
+ if(publicRound==='round2'){
+  $('publicLeaderboard').innerHTML=`<table><thead><tr><th>Rank</th><th>Team</th><th>Best accuracy</th><th>Latest accuracy</th><th>Change vs previous (pp)</th><th>Change vs initial (pp)</th><th>Uploads</th></tr></thead><tbody>${d.teams.map(t=>`<tr><td>${t.rank}</td><td>${esc(t.team)}</td><td>${fmtPct(t.accuracy)}</td><td>${fmtPct(t.latestAccuracy)}</td><td>${fmtPP(t.changeFromPrevious)}</td><td>${fmtPP(t.changeFromInitial)}</td><td>${t.submissionCount}</td></tr>`).join('')}</tbody></table>`;
+ }else{
+  $('publicLeaderboard').innerHTML=`<table><thead><tr><th>Rank</th><th>Team</th><th>First pass</th><th>Second pass</th><th>Change (pp)</th></tr></thead><tbody>${d.teams.map(t=>`<tr><td>${t.rank}</td><td>${esc(t.team)}</td><td>${t.baseline==null?'\u2014':fmtPct(t.baseline)}</td><td>${fmtPct(t.accuracy)}</td><td>${fmtPP(t.change)}</td></tr>`).join('')}</tbody></table>`;
+ }
+}catch(e){$('publicLeaderboard').textContent=e.message;}}
+
 function viewAdmin(v){adminView=v;const ids={submissions:'adminSubmissions',scores:'adminScores',answers:'adminAnswers',info:'adminInfo',settings:'adminSettings'};Object.entries(ids).forEach(([key,id])=>$(id).classList.toggle('hidden',v!==key));document.querySelectorAll('[data-admin-view]').forEach(b=>b.classList.toggle('active',b.dataset.adminView===v));$('adminTitle').textContent={submissions:'Submissions',scores:'Leaderboard and analysis',answers:'Private answer key',info:'Dataset information',settings:'Settings'}[v];}
 document.querySelectorAll('[data-admin-view]').forEach(b=>b.onclick=()=>viewAdmin(b.dataset.adminView));$('adminRound').onchange=()=>loadAdmin();$('refresh').onclick=loadAdmin;
-async function loadAdmin(){try{results=await request('/api/admin/results?round='+adminRound(),{admin:true});$('summary').innerHTML=`<div class="stat"><small>Teams received</small><strong>${results.teams.length}</strong></div><div class="stat"><small>Answer key</small><strong>${results.hasKey?'Loaded':'Missing'}</strong></div>`;
-$('leaderboardTable').innerHTML=`<table><thead><tr><th>Rank</th><th>Team</th><th>First pass</th><th>Second pass</th><th>Change (pp)</th><th>Status</th></tr></thead><tbody>${results.teams.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.team)}</td><td>${t.baseline?.result?t.baseline.result.accuracy.toFixed(2)+'%':'—'}</td><td>${t.final?.result?t.final.result.accuracy.toFixed(2)+'%':'—'}</td><td>${t.change==null?'—':(t.change>0?'+':'')+t.change.toFixed(2)}</td><td>${esc(t.issue||(t.result?'Scored':'Awaiting key or second pass'))}</td></tr>`).join('')}</tbody></table>`;
-$('teamSelect').innerHTML='<option value="">Select a team</option>'+results.teams.map((t,i)=>`<option value="${i}">${esc(t.team)}</option>`).join('');$('analysis').innerHTML='';await loadFeedbackReleaseStatus();await loadSubmissionControlStatus();msg('adminMsg','Dashboard loaded.','success');}catch(e){msg('adminMsg',e.message,'error');}}
+async function loadAdmin(){try{
+ results=await request('/api/admin/results?round='+adminRound());
+ const isRound2=adminRound()==='round2';
+ $('summary').innerHTML=`<div class="stat"><small>Teams received</small><strong>${results.teams.length}</strong></div>${isRound2?`<div class="stat"><small>Round 2 uploads</small><strong>${results.totalSubmissions||0}</strong></div>`:''}<div class="stat"><small>Answer key</small><strong>${results.hasKey?'Loaded':'Missing'}</strong></div>`;
+ if(isRound2){
+  $('leaderboardTable').innerHTML=`<table><thead><tr><th>Rank</th><th>Team</th><th>Best score</th><th>Latest score</th><th>Change vs previous (pp)</th><th>Change vs initial (pp)</th><th>Uploads</th><th>Status</th></tr></thead><tbody>${results.teams.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.team)}</td><td>${fmtPct(t.bestAccuracy)}</td><td>${fmtPct(t.latestAccuracy)}</td><td>${fmtPP(t.changeFromPrevious)}</td><td>${fmtPP(t.changeFromInitial)}</td><td>${t.submissionCount}</td><td>${esc(t.issue||(t.result?'Scored':'Awaiting key or submission'))}</td></tr>`).join('')}</tbody></table>`;
+  $('analysisPass').previousElementSibling.textContent='Submission to inspect';
+  $('analysisPass').innerHTML='<option value="">Select a team first</option>';
+ }else{
+  $('leaderboardTable').innerHTML=`<table><thead><tr><th>Rank</th><th>Team</th><th>First pass</th><th>Second pass</th><th>Change (pp)</th><th>Status</th></tr></thead><tbody>${results.teams.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.team)}</td><td>${t.baseline?.result?fmtPct(t.baseline.result.accuracy):'\u2014'}</td><td>${t.final?.result?fmtPct(t.final.result.accuracy):'\u2014'}</td><td>${fmtPP(t.change)}</td><td>${esc(t.issue||(t.result?'Scored':'Awaiting key or second pass'))}</td></tr>`).join('')}</tbody></table>`;
+  $('analysisPass').previousElementSibling.textContent='Pass to inspect';
+  $('analysisPass').innerHTML='<option value="baseline">First pass</option><option value="final" selected>Second pass</option>';
+ }
+ $('teamSelect').innerHTML='<option value="">Select team</option>'+results.teams.map((t,i)=>`<option value="${i}">${esc(t.team)}</option>`).join('');
+ $('analysis').innerHTML='';await loadFeedbackReleaseStatus();await loadSubmissionControlStatus();msg('adminMsg','Dashboard loaded.','success');
+}catch(e){msg('adminMsg',e.message,'error');}}
+
 $('uploadKey').onclick=async()=>{try{const f=$('keyFile').files[0];if(!f)throw Error('Choose an answer key CSV');if(!confirm('Replace the private answer key for this round? Scores will be recalculated.'))return;const d=await request('/api/admin/key?round='+adminRound(),{method:'POST',admin:true,body:{csv:await f.text()}});msg('adminMsg',`Saved ${d.count} private labels for ${adminRound()}.`,'success');await loadAdmin();}catch(e){msg('adminMsg',e.message,'error');}};
-$('teamSelect').onchange=()=>{if(!results||$('teamSelect').value===''){$('analysis').innerHTML='';return;}const t=results.teams[Number($('teamSelect').value)];const chosen=t.passes?.[$('analysisPass').value];if(!chosen?.result){$('analysis').textContent=chosen?.issue||'No scored submission for this pass';return;}const r=chosen.result;let html='<div class="tablewrap"><table class="heat"><thead><tr><th>Actual / predicted</th>'+results.classes.map((_,i)=>`<th>${i}</th>`).join('')+'</tr></thead><tbody>';r.matrix.forEach((row,i)=>{html+=`<tr><th>${i} · ${esc(results.classes[i])}</th>`;row.forEach((v,j)=>html+=`<td style="background:${i===j?`rgba(35,150,90,${Math.min(.7,.07+v/40)})`:`rgba(218,105,50,${Math.min(.6,.04+v/40)})`}">${v}</td>`);html+='</tr>';});html+='</tbody></table></div><h3>Common errors</h3>'+(r.errors.slice(0,8).map(e=>`<p>${esc(results.classes[e.actual])} → ${esc(results.classes[e.predicted])}: ${e.count}</p>`).join('')||'<p>No errors.</p>');$('analysis').innerHTML=html;};
+function renderAnalysisRecord(record){
+ if(!record?.result){$('analysis').textContent=record?.issue||'No scored submission is available.';return;}
+ const r=record.result;let html='<div class="tablewrap"><table class="heat"><thead><tr><th>Actual / predicted</th>'+results.classes.map((_,i)=>`<th>${i}</th>`).join('')+'</tr></thead><tbody>';
+ r.matrix.forEach((row,i)=>{html+=`<tr><th>${i} \u00b7 ${esc(results.classes[i])}</th>`;row.forEach((v,j)=>html+=`<td style="background:${i===j?`rgba(35,150,90,${Math.min(.7,.07+v/40)})`:`rgba(218,105,50,${Math.min(.6,.04+v/40)})`}">${v}</td>`);html+='</tr>';});
+ html+='</tbody></table></div><h3>Common errors</h3>'+(r.errors.slice(0,8).map(e=>`<p>${esc(results.classes[e.actual])} \u2192 ${esc(results.classes[e.predicted])}: ${e.count}</p>`).join('')||'<p>No errors.</p>');$('analysis').innerHTML=html;
+}
+$('teamSelect').onchange=()=>{
+ if(!results||$('teamSelect').value===''){$('analysis').innerHTML='';$('analysisPass').innerHTML=adminRound()==='round2'?'<option value="">Select a team first</option>':'<option value="baseline">First pass</option><option value="final" selected>Second pass</option>';return;}
+ const t=results.teams[Number($('teamSelect').value)];
+ if(adminRound()==='round2'){
+  const history=t.history||[];
+  $('analysisPass').innerHTML=history.map((h,i)=>`<option value="${i}">Submission ${h.attempt}: ${fmtPct(h.result?.accuracy)} · ${fmtTime(h.submittedAt)}</option>`).join('')||'<option value="">No submissions</option>';
+  if(history.length){const bestIndex=history.findIndex(h=>h.submissionId===t.bestSubmission?.submissionId);$('analysisPass').value=String(bestIndex>=0?bestIndex:history.length-1);renderAnalysisRecord(history[Number($('analysisPass').value)]);}
+ }else renderAnalysisRecord(t.passes?.[$('analysisPass').value]);
+};
+$('analysisPass').onchange=()=>{
+ if($('teamSelect').value==='')return;
+ const t=results.teams[Number($('teamSelect').value)];
+ renderAnalysisRecord(adminRound()==='round2'?t.history?.[Number($('analysisPass').value)]:t.passes?.[$('analysisPass').value]);
+};
+
 function download(name,rows){const csv=rows.map(r=>r.map(x=>{const s=String(x??'');return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',')).join('\r\n')+'\r\n';const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'})),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),500);}
 $('analysisPass').onchange=()=>{$('teamSelect').onchange();};
-$('exportLeaderboard').onclick=()=>{if(!results)return;download(adminRound()+'_leaderboard.csv',[['rank','team','first_pass_accuracy_percent','second_pass_accuracy_percent','change_percentage_points'],...results.teams.map((t,i)=>[i+1,t.team,t.baseline?.result?.accuracy??'',t.final?.result?.accuracy??'',t.change??''])]);};
-$('exportDetail').onclick=()=>{if(!results)return;download(adminRound()+'_instructor_report.csv',[['team','pass','submitted_at','accuracy_percent','actual_label','predicted_label','count'],...results.teams.flatMap(t=>['baseline','final'].flatMap(pass=>{const rec=t.passes?.[pass];return rec?.result?rec.result.matrix.flatMap((row,i)=>row.map((count,j)=>[t.team,pass,rec.submittedAt,rec.result.accuracy,i,j,count])):rec?[[t.team,pass,rec.submittedAt,'','','',rec.issue||'Unscored']]:[];}))]);};
+$('exportLeaderboard').onclick=()=>{
+ if(!results)return;
+ if(adminRound()==='round2')download('round2_leaderboard.csv',[
+  ['rank','team','submission_count','initial_accuracy_percent','latest_accuracy_percent','best_accuracy_percent','change_vs_previous_pp','change_vs_initial_pp'],
+  ...results.teams.map((t,i)=>[i+1,t.team,t.submissionCount,t.initialAccuracy??'',t.latestAccuracy??'',t.bestAccuracy??'',t.changeFromPrevious??'',t.changeFromInitial??''])
+ ]);
+ else download('round1_leaderboard.csv',[
+  ['rank','team','first_pass_accuracy_percent','second_pass_accuracy_percent','change_percentage_points'],
+  ...results.teams.map((t,i)=>[i+1,t.team,t.baseline?.result?.accuracy??'',t.final?.result?.accuracy??'',t.change??''])
+ ]);
+};
+$('exportDetail').onclick=()=>{
+ if(!results)return;
+ if(adminRound()==='round2'){
+  const rows=[['team','submission_number','submission_id','submitted_at','accuracy_percent','change_vs_previous_pp','change_vs_initial_pp','actual_label','predicted_label','count']];
+  for(const t of results.teams)for(const h of t.history){
+   if(h.result)h.result.matrix.forEach((row,a)=>row.forEach((count,pred)=>rows.push([t.team,h.attempt,h.submissionId,h.submittedAt,h.result.accuracy,h.changeFromPrevious??'',h.changeFromInitial??'',a,pred,count])));
+   else rows.push([t.team,h.attempt,h.submissionId,h.submittedAt,'',h.changeFromPrevious??'',h.changeFromInitial??'','','',h.issue||'Unscored']);
+  }
+  download('round2_submission_history_and_results.csv',rows);
+ }else download('round1_instructor_report.csv',[
+  ['team','pass','submitted_at','accuracy_percent','actual_label','predicted_label','count'],
+  ...results.teams.flatMap(t=>['baseline','final'].flatMap(pass=>{const rec=t.passes?.[pass];return rec?.result?rec.result.matrix.flatMap((row,i)=>row.map((count,j)=>[t.team,pass,rec.submittedAt,rec.result.accuracy,i,j,count])):rec?[[t.team,pass,rec.submittedAt,'','','',rec.issue||'Unscored']]:[];}))
+ ]);
+};
+
 async function publish(published){try{await request('/api/admin/publish?round='+adminRound(),{method:'POST',admin:true,body:{published}});msg('adminMsg',published?'Leaderboard published.':'Leaderboard unpublished.','success');}catch(e){msg('adminMsg',e.message,'error');}}
 $('publishLeaderboard').onclick=()=>publish(true);$('unpublishLeaderboard').onclick=()=>publish(false);
 
@@ -69,7 +136,21 @@ const originalViewAdmin=viewAdmin;viewAdmin=function(v){originalViewAdmin(v);if(
 
 // Private feedback is fetched only after the backend verifies the team's access code.
 function feedbackTable(matrix,classes){let html='<div class="tablewrap"><table class="heat"><thead><tr><th>Actual / predicted</th>'+classes.map((_,i)=>`<th>${i}</th>`).join('')+'</tr></thead><tbody>';matrix.forEach((row,i)=>{html+=`<tr><th>${i} · ${esc(classes[i])}</th>`+row.map(v=>`<td>${v}</td>`).join('')+'</tr>';});return html+'</tbody></table></div>';}
-$('viewFeedback').onclick=async()=>{const output=$('feedbackOutput');output.textContent='Loading feedback…';try{const team=$('feedbackTeam').value,code=$('feedbackCode').value;if(!team||!code.trim())throw Error('Select your team and enter its access code.');const d=await request('/api/team/feedback?round='+$('feedbackRound').value,{method:'POST',body:{team,code}});const render=(pass,label)=>{const r=d.passes?.[pass]?.result;if(!r)return `<p>${label}: no submission recorded.</p>`;return `<h3>${label}: ${r.accuracy.toFixed(2)}% (${r.correct}/${r.total})</h3>`+feedbackTable(r.matrix,d.classes)+'<h4>Common classification errors</h4>'+(r.errors.slice(0,8).map(e=>`<p>${esc(d.classes[e.actual])} → ${esc(d.classes[e.predicted])}: ${e.count}</p>`).join('')||'<p>No classification errors.</p>');};output.innerHTML=`<div class="message success"><strong>${esc(d.team)}</strong> · ${d.change==null?'':`Change: ${d.change>0?'+':''}${d.change.toFixed(2)} percentage points`}</div>`+render('baseline','First pass')+render('final','Second pass');}catch(e){output.innerHTML=`<div class="message error">${esc(e.message)}</div>`;}};
+$('viewFeedback').onclick=async()=>{const output=$('feedbackOutput');output.textContent='Loading feedback\u2026';try{
+ const team=$('feedbackTeam').value,code=$('feedbackCode').value;if(!team||!code.trim())throw Error('Select your team and enter its access code.');
+ const d=await request('/api/team/feedback?round='+$('feedbackRound').value,{method:'POST',body:{team,code}});
+ if(d.round==='round2'){
+  const rows=d.history.map(h=>`<tr><td>${h.attempt}</td><td>${esc(fmtTime(h.submittedAt))}</td><td>${fmtPct(h.result?.accuracy)}</td><td>${h.result?`${h.result.correct}/${h.result.total}`:'\u2014'}</td><td>${fmtPP(h.changeFromPrevious)}</td><td>${fmtPP(h.changeFromInitial)}</td>${h.submissionId===d.bestSubmission?.submissionId?'<td><strong>Best</strong></td>':'<td></td>'}</tr>`).join('');
+  const summary=`<div class="message success"><strong>${esc(d.team)}</strong><br>Best score: ${fmtPct(d.bestAccuracy)}<br>Latest score: ${fmtPct(d.latestAccuracy)}<br>Latest change vs previous: ${fmtPP(d.changeFromPrevious)}<br>Latest change vs initial: ${fmtPP(d.changeFromInitial)}</div>`;
+  const history=`<h3>Submission history and results</h3><div class="tablewrap"><table><thead><tr><th>#</th><th>Submitted</th><th>Accuracy</th><th>Correct</th><th>Change vs previous (pp)</th><th>Change vs initial (pp)</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const best=d.bestSubmission?.result?`<h3>Best submission (#${d.bestSubmission.attempt}) confusion matrix</h3>${feedbackTable(d.bestSubmission.result.matrix,d.classes)}<h4>Common classification errors</h4>`+(d.bestSubmission.result.errors.slice(0,8).map(e=>`<p>${esc(d.classes[e.actual])} \u2192 ${esc(d.classes[e.predicted])}: ${e.count}</p>`).join('')||'<p>No classification errors.</p>'):'<p>No scored submissions yet.</p>';
+  output.innerHTML=summary+history+best;
+ }else{
+  const render=(pass,label)=>{const r=d.passes?.[pass]?.result;if(!r)return `<p>${label}: no submission recorded.</p>`;return `<h3>${label}: ${r.accuracy.toFixed(2)}% (${r.correct}/${r.total})</h3>`+feedbackTable(r.matrix,d.classes)+'<h4>Common classification errors</h4>'+(r.errors.slice(0,8).map(e=>`<p>${esc(d.classes[e.actual])} \u2192 ${esc(d.classes[e.predicted])}: ${e.count}</p>`).join('')||'<p>No classification errors.</p>');};
+  output.innerHTML=`<div class="message success"><strong>${esc(d.team)}</strong> · ${d.change==null?'':`Change: ${d.change>0?'+':''}${d.change.toFixed(2)} percentage points`}</div>`+render('baseline','First pass')+render('final','Second pass');
+ }
+}catch(e){output.innerHTML=`<div class="message error">${esc(e.message)}</div>`;}};
+
 async function loadFeedbackReleaseStatus(){try{const d=await request('/api/admin/feedback-status?round='+adminRound(),{admin:true});$('feedbackReleaseStatus').textContent=d.released?'Team feedback released':'Team feedback withheld';}catch(e){$('feedbackReleaseStatus').textContent='Feedback status unavailable: '+e.message;}}
 async function setFeedbackRelease(released){try{if(released&&!confirm('Release private team feedback? This allows teams to view confusion matrices using their access codes.'))return;await request('/api/admin/feedback-release?round='+adminRound(),{method:'POST',admin:true,body:{released}});await loadFeedbackReleaseStatus();msg('adminMsg',released?'Team feedback released.':'Team feedback withheld.','success');}catch(e){msg('adminMsg',e.message,'error');}}
 $('releaseFeedback').onclick=()=>setFeedbackRelease(true);$('withholdFeedback').onclick=()=>setFeedbackRelease(false);
